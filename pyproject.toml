@@ -1,0 +1,15 @@
+[project]
+name = "agentic-vision-pipeline-repair"
+version = "0.1.0"
+description = "Reproducible OpenCV experiments for validation-driven vision pipeline repair."
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.11.2",
+    "numpy>=2.4.6",
+    "opencv-python-headless==5.0.0.93",
+    "pytest>=9.1.1",
+    "streamlit>=1.65.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

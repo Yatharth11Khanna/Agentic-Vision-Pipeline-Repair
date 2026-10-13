@@ -1,18 +1,23 @@
-# [Project name]
+# Agentic Vision Pipeline Repair
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+An OpenCV 5 proof of concept that measures synthetic circle-detection failures, tests bounded validation-driven repairs, and reports untouched held-out test results.
 
 ## Run & Operate
 
+- `.pythonlibs/bin/streamlit run app.py --server.port 5000 --server.address 0.0.0.0` — run the Streamlit app
+- `.pythonlibs/bin/python -m pytest -q` — run Python tests
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Required environment variables: none
 
 ## Stack
 
+- Python 3.11
+- Streamlit, NumPy, Matplotlib, pytest
+- `opencv-python-headless==5.0.0.93` (OpenCV 5 is verified at startup; no OpenCV 4 fallback)
 - pnpm workspaces, Node.js 24, TypeScript 5.9
 - API: Express 5
 - DB: PostgreSQL + Drizzle ORM
@@ -22,23 +27,33 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `app.py` — Streamlit experiment interface
+- `vision_pipeline.py` — deterministic synthetic data, OpenCV detector, matching, and metrics
+- `repair_agent.py` — bounded validation search, held-out evaluation, and JSON trace persistence
+- `tests/` — pytest coverage
+- `README.md` — experiment methodology, seeds, matching rule, and run instructions
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Configuration selection uses validation only; held-out images are evaluated after the search stops.
+- A prediction must reach IoU 0.30 to match the single labeled target; duplicate detections count as false positives.
+- The repair objective is F1 minus 0.10 times image failure rate, with a 0.002 threshold for meaningful improvement.
+- The fixed train, validation, and test seeds are 1103, 2207, and 3301.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+Users can inspect deterministic synthetic images, run the baseline, execute a measured parameter search, compare held-out metrics, inspect regressions and failures, and download the chosen configuration and full agent trace.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- Treat this as a technical proof of concept: prioritize a reproducible end-to-end experiment over visual polish.
+- Do not use a paid API or present fabricated performance numbers.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Keep `opencv-python-headless==5.0.0.93` pinned. If OpenCV 5 is unavailable or fails its runtime check, report the exact failure rather than claiming OpenCV 4 compliance.
+- Do not add test-set evaluation to the selection loop.
+- Run reports are written under `generated-artifacts/` and excluded from deploy/check-in output.
 
 ## Pointers
 
