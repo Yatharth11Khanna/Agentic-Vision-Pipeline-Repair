@@ -31,7 +31,7 @@ MAX_NO_IMPROVEMENT_STREAK = 4
 ProgressCallback = Callable[[dict[str, Any]], None]
 
 
-def _objective(metrics: dict[str, Any]) -> float:
+def validation_objective(metrics: dict[str, Any]) -> float:
     # Penalize image-level errors while keeping F1 as the dominant score.
     return float(metrics["f1"]) - 0.10 * float(metrics["failure_rate"])
 
@@ -45,7 +45,7 @@ def _weakest_conditions(evaluation: dict[str, Any]) -> list[str]:
             if condition in by_condition and by_condition[condition]["failure_count"] > 0
         ),
         key=lambda condition: (
-            _objective(by_condition[condition]),
+            validation_objective(by_condition[condition]),
             -by_condition[condition]["failure_rate"],
             condition,
         ),
@@ -120,7 +120,7 @@ def _proposals_for_condition(
     return proposals
 
 
-def _same_image_comparison(
+def compare_same_images(
     baseline: dict[str, Any], repaired: dict[str, Any]
 ) -> dict[str, Any]:
     baseline_by_id = {row["sample_id"]: row for row in baseline["image_results"]}
@@ -162,21 +162,16 @@ def _same_image_comparison(
     }
 
 
-def run_repair_agent(
+def run_adaptive_selection(
     validation_samples: list[SyntheticSample],
-    test_samples: list[SyntheticSample],
     progress_callback: ProgressCallback | None = None,
     budget: int = EXPERIMENT_BUDGET,
 ) -> dict[str, Any]:
-    """Choose config on validation only, then evaluate both configs on held-out test."""
-    if not validation_samples or not test_samples:
-        raise ValueError("Validation and held-out test datasets must both be non-empty.")
+    """Select a configuration from validation images without accepting test data."""
+    if not validation_samples:
+        raise ValueError("The validation dataset must be non-empty.")
     if any(sample.split != "validation" for sample in validation_samples):
-        raise ValueError("The repair agent accepts validation samples only for selection.")
-    if any(sample.split != "test" for sample in test_samples):
-        raise ValueError("The held-out evaluation accepts only test samples.")
-    if {sample.sample_id for sample in validation_samples} & {sample.sample_id for sample in test_samples}:
-        raise ValueError("Validation and test sample IDs must not overlap.")
+        raise ValueError("Adaptive selection accepts validation samples only.")
 
     run_started = perf_counter()
     budget = max(0, int(budget))
@@ -186,7 +181,7 @@ def run_repair_agent(
     baseline_validation = evaluate_dataset(validation_samples, BASELINE_CONFIG)
     best_config = BASELINE_CONFIG
     best_validation = baseline_validation
-    best_objective = _objective(baseline_validation["metrics"])
+    best_objective = validation_objective(baseline_validation["metrics"])
     tested = {json.dumps(config_as_dict(BASELINE_CONFIG), sort_keys=True)}
     experiments: list[dict[str, Any]] = []
     no_improvement_streak = 0
@@ -268,7 +263,7 @@ def run_repair_agent(
 
         tested.add(json.dumps(config_as_dict(candidate), sort_keys=True))
         candidate_validation = evaluate_dataset(validation_samples, candidate)
-        candidate_objective = _objective(candidate_validation["metrics"])
+        candidate_objective = validation_objective(candidate_validation["metrics"])
         objective_change = candidate_objective - best_objective
         meaningful = objective_change >= MIN_MEANINGFUL_IMPROVEMENT
         experiment = {
@@ -333,50 +328,18 @@ def run_repair_agent(
             )
             break
 
-    # Test images are not generated, evaluated, or inspected until selection has stopped.
-    if progress_callback:
-        progress_callback(
-            {
-                "phase": "held_out",
-                "message": "Selection is complete. Evaluating baseline and selected configuration on the same held-out test images.",
-            }
-        )
-    baseline_test = evaluate_dataset(test_samples, BASELINE_CONFIG)
-    selected_test = evaluate_dataset(test_samples, best_config)
     selected_on_validation = best_validation
-    selected_objective = _objective(selected_on_validation["metrics"])
+    selected_objective = validation_objective(selected_on_validation["metrics"])
     repair_selected = (
         best_config != BASELINE_CONFIG
-        and selected_objective - _objective(baseline_validation["metrics"])
+        and selected_objective - validation_objective(baseline_validation["metrics"])
         >= MIN_MEANINGFUL_IMPROVEMENT
     )
-    comparison = _same_image_comparison(baseline_test, selected_test)
-    validation_comparison = _same_image_comparison(baseline_validation, selected_on_validation)
-
-    trace.append(
-        {
-            "step": len(trace),
-            "type": "held_out_evaluation",
-            "decision": (
-                "Configuration selection is complete; compare baseline and selected config on exactly the same untouched test IDs."
-            ),
-            "sample_count": comparison["same_image_count"],
-            "same_sample_ids": comparison["same_sample_ids"],
-            "baseline_metrics": baseline_test["metrics"],
-            "selected_metrics": selected_test["metrics"],
-        }
-    )
+    validation_comparison = compare_same_images(baseline_validation, selected_on_validation)
 
     return {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "opencv": opencv_version_status(),
-        "seeds": dict(SPLIT_SEEDS),
-        "split_sizes": dict(SPLIT_SIZES),
-        "matching_rule": (
-            f"Each image has one ground-truth target. Predictions are confidence-sorted; at most "
-            f"one can match it, and IoU must be at least {IOU_MATCH_THRESHOLD:.2f}. "
-            "Remaining predictions count as false positives. An image fails if it has any false positive or false negative."
-        ),
         "objective_rule": (
             "Validation objective = F1 − 0.10 × image failure rate; an update is meaningful at "
             f"an objective gain of {MIN_MEANINGFUL_IMPROVEMENT:.3f} or more. Precision and recall are reported separately."
@@ -388,32 +351,99 @@ def run_repair_agent(
         "experiment_count": len(experiments),
         "validation_evaluation_count": 1 + len(experiments),
         "runtime_ms": round((perf_counter() - run_started) * 1000, 3),
-        "measured_pipeline_runtime_ms": round(
-            baseline_validation["runtime_ms"]
-            + sum(experiment["runtime_ms"] for experiment in experiments)
-            + baseline_test["runtime_ms"]
-            + selected_test["runtime_ms"],
+        "validation_pipeline_runtime_ms": round(
+            baseline_validation["runtime_ms"] + sum(experiment["runtime_ms"] for experiment in experiments),
             3,
         ),
         "stopping_condition": stopping_condition,
+        "validation_seeds": sorted({sample.seed for sample in validation_samples}),
         "validation": {
             "baseline": baseline_validation,
             "selected": selected_on_validation,
             "changes": metric_changes(baseline_validation["metrics"], selected_on_validation["metrics"]),
-            "objective_baseline": round(_objective(baseline_validation["metrics"]), 6),
+            "objective_baseline": round(validation_objective(baseline_validation["metrics"]), 6),
             "objective_selected": round(selected_objective, 6),
             "sample_ids": [sample.sample_id for sample in validation_samples],
         },
+        "validation_failure_analysis": validation_comparison,
+        "experiments": experiments,
+        "trace": trace,
+    }
+
+
+def run_repair_agent(
+    validation_samples: list[SyntheticSample],
+    test_samples: list[SyntheticSample],
+    progress_callback: ProgressCallback | None = None,
+    budget: int = EXPERIMENT_BUDGET,
+) -> dict[str, Any]:
+    """Choose on validation only, then compare both configurations on held-out test."""
+    if not test_samples:
+        raise ValueError("The held-out test dataset must be non-empty.")
+    if any(sample.split != "test" for sample in test_samples):
+        raise ValueError("Held-out evaluation accepts test samples only.")
+    if {sample.sample_id for sample in validation_samples} & {sample.sample_id for sample in test_samples}:
+        raise ValueError("Validation and test sample IDs must not overlap.")
+
+    run_started = perf_counter()
+    selection = run_adaptive_selection(
+        validation_samples,
+        progress_callback=progress_callback,
+        budget=budget,
+    )
+    if progress_callback:
+        progress_callback(
+            {
+                "phase": "held_out",
+                "message": (
+                    "Selection is complete. Evaluating baseline and selected configuration "
+                    "on the same held-out test images."
+                ),
+            }
+        )
+    baseline_test = evaluate_dataset(test_samples, BASELINE_CONFIG)
+    selected_test = evaluate_dataset(test_samples, DetectorConfig(**selection["selected_config"]))
+    comparison = compare_same_images(baseline_test, selected_test)
+    trace = [
+        *selection["trace"],
+        {
+            "step": len(selection["trace"]),
+            "type": "held_out_evaluation",
+            "decision": (
+                "Configuration selection is complete; compare baseline and selected config "
+                "on exactly the same untouched test IDs."
+            ),
+            "sample_count": comparison["same_image_count"],
+            "same_sample_ids": comparison["same_sample_ids"],
+            "baseline_metrics": baseline_test["metrics"],
+            "selected_metrics": selected_test["metrics"],
+        },
+    ]
+    return {
+        **selection,
+        "seeds": dict(SPLIT_SEEDS),
+        "split_sizes": dict(SPLIT_SIZES),
+        "matching_rule": (
+            f"Each image has one ground-truth target. Predictions are confidence-sorted; at most "
+            f"one can match it, and IoU must be at least {IOU_MATCH_THRESHOLD:.2f}. "
+            "Remaining predictions count as false positives. An image fails if it has any false positive or false negative."
+        ),
+        "trace": trace,
         "test": {
             "baseline": baseline_test,
             "selected": selected_test,
             "changes": metric_changes(baseline_test["metrics"], selected_test["metrics"]),
             "comparison": comparison,
             "sample_ids": [sample.sample_id for sample in test_samples],
+            "seeds": sorted({sample.seed for sample in test_samples}),
         },
-        "validation_failure_analysis": validation_comparison,
-        "experiments": experiments,
-        "trace": trace,
+        "runtime_ms": round((perf_counter() - run_started) * 1000, 3),
+        "measured_pipeline_runtime_ms": round(
+            selection["validation_pipeline_runtime_ms"]
+            + baseline_test["runtime_ms"]
+            + selected_test["runtime_ms"],
+            3,
+        ),
     }
 
 

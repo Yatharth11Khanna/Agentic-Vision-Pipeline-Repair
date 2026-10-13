@@ -12,6 +12,7 @@ import streamlit as st
 try:
     import cv2
 
+    from benchmark_ui import load_saved_benchmark, render_benchmark_page
     from repair_agent import run_repair_agent, save_run_report
     from vision_pipeline import (
         BASELINE_CONFIG,
@@ -37,11 +38,11 @@ st.set_page_config(page_title="Agentic Vision Pipeline Repair", layout="wide")
 
 
 @st.cache_data(show_spinner=False)
-def load_split(split: str) -> list[SyntheticSample]:
-    # All generated images are deterministic for the documented split seeds.
+def load_split(split: str, seed: int | None = None) -> list[SyntheticSample]:
+    # Omitting seed preserves the documented default split used by existing pages.
     from vision_pipeline import generate_split
 
-    return generate_split(split)
+    return generate_split(split, seed)
 
 
 def load_saved_report() -> dict[str, Any] | None:
@@ -618,6 +619,8 @@ def trace_page() -> None:
 
 if "run_report" not in st.session_state:
     st.session_state["run_report"] = load_saved_report()
+if "benchmark_report" not in st.session_state:
+    st.session_state["benchmark_report"] = load_saved_benchmark()
 
 page = st.sidebar.radio(
     "Experiment",
@@ -626,6 +629,7 @@ page = st.sidebar.radio(
         "Dataset",
         "Baseline",
         "Agent run",
+        "Benchmark",
         "Results",
         "Failure analysis",
         "Agent trace",
@@ -641,9 +645,11 @@ elif page == "Baseline":
     baseline_page()
 elif page == "Agent run":
     agent_run_page()
+elif page == "Benchmark":
+    render_benchmark_page(load_split, annotate_sample)
 elif page == "Results":
     results_page()
 elif page == "Failure analysis":
     failure_analysis_page()
-else:
+elif page == "Agent trace":
     trace_page()

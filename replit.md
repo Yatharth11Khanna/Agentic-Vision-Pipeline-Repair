@@ -30,6 +30,8 @@ An OpenCV 5 proof of concept that measures synthetic circle-detection failures, 
 - `app.py` — Streamlit experiment interface
 - `vision_pipeline.py` — deterministic synthetic data, OpenCV detector, matching, and metrics
 - `repair_agent.py` — bounded validation search, held-out evaluation, and JSON trace persistence
+- `benchmark.py` / `benchmark_reporting.py` — independent multi-trial runs, paired statistics, and CSV/JSON exports
+- `benchmark_ui.py` — Streamlit benchmark controls, summaries, charts, and failure examples
 - `tests/` — pytest coverage
 - `README.md` — experiment methodology, seeds, matching rule, and run instructions
 
@@ -39,10 +41,13 @@ An OpenCV 5 proof of concept that measures synthetic circle-detection failures, 
 - A prediction must reach IoU 0.30 to match the single labeled target; duplicate detections count as false positives.
 - The repair objective is F1 minus 0.10 times image failure rate, with a 0.002 threshold for meaningful improvement.
 - The fixed train, validation, and test seeds are 1103, 2207, and 3301.
+- The separate benchmark creates at least five independent seed trials and evaluates the baseline, adaptive repair, and budget-matched seeded random search on the same held-out images per trial.
+- Both benchmark searches use validation samples only; each test split is generated after both selections and cannot influence the selected configuration.
+- Benchmark exports live in `generated-artifacts/benchmark/`; they do not overwrite the single-run report.
 
 ## Product
 
-Users can inspect deterministic synthetic images, run the baseline, execute a measured parameter search, compare held-out metrics, inspect regressions and failures, and download the chosen configuration and full agent trace.
+Users can inspect deterministic synthetic images, run the baseline, execute a measured parameter search, compare held-out metrics, inspect regressions and failures, and download the chosen configuration and full agent trace. The Benchmark page also runs a reproducible three-way comparison over independent trials with aggregate and paired results.
 
 ## User preferences
 

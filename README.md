@@ -54,3 +54,33 @@ false-positive/false-negative counts, and regressions are retained in the run re
 report and selected configuration are written to `generated-artifacts/` and can be downloaded from
 the app.
 
+## Multi-trial benchmark
+
+Open **Benchmark** in the sidebar to compare three methods over 5–20 independent trials:
+
+1. The unchanged baseline.
+2. The adaptive validation-driven repair agent.
+3. A seeded non-adaptive random search over the same declared parameter bounds.
+
+Each trial uses independent train, validation, random-search, and test seeds. Both searches receive
+validation samples only. The test split is generated only after both searches have selected a
+configuration, and all three methods are evaluated on the same held-out images. Random search
+evaluates exactly as many candidates as adaptive repair actually evaluated in that trial, including
+when adaptive repair stops early. Its full candidate sequence is generated before candidate scoring
+and cannot react to results.
+
+The report includes per-trial and aggregate precision, recall, F1, image failure rate, condition-level
+results, paired method differences, mean and sample standard deviation, two-sided 95% Student-t
+intervals, experiment counts, runtime, and per-image repair/regression/failure comparisons. The
+app's summary calls out when the held-out data do not show a clear adaptive advantage.
+
+Benchmark files are separate from the existing single-run report:
+
+- `generated-artifacts/benchmark/latest_benchmark.json` — full seeds, results, comparisons, and
+  adaptive/random-search traces.
+- `generated-artifacts/benchmark/latest_benchmark.csv` — per-trial and aggregate overall and
+  per-condition metric rows for validation and held-out test data.
+
+Use the app's download buttons to export either file. The default is five trials with base seed
+`20261013`; the base seed and trial count can be changed in the Benchmark page.
+

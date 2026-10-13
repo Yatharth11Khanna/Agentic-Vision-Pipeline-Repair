@@ -171,13 +171,16 @@ def _apply_condition(
     return output.astype(np.uint8)
 
 
-def generate_split(split: str) -> list[SyntheticSample]:
-    """Generate a deterministic split with independent, documented split seeds."""
+def generate_split(split: str, seed: int | None = None) -> list[SyntheticSample]:
+    """Generate a deterministic split; an explicit seed supports independent trials."""
     require_opencv5()
     if split not in SPLIT_SEEDS:
         raise ValueError(f"Unknown split {split!r}; expected one of {tuple(SPLIT_SEEDS)}.")
 
-    seed = SPLIT_SEEDS[split]
+    explicit_seed = seed is not None
+    seed = SPLIT_SEEDS[split] if seed is None else int(seed)
+    if seed < 0 or seed > 2**32 - 1:
+        raise ValueError("Split seeds must be integers between 0 and 2**32 - 1.")
     count = SPLIT_SIZES[split]
     rng = np.random.default_rng(seed)
     conditions = np.resize(np.asarray(CONDITIONS, dtype=object), count)
@@ -207,7 +210,11 @@ def generate_split(split: str) -> list[SyntheticSample]:
         bbox = (center_x - radius, center_y - radius, 2 * radius + 1, 2 * radius + 1)
         samples.append(
             SyntheticSample(
-                sample_id=f"{split}-{index:03d}",
+                sample_id=(
+                    f"{split}-{seed}-{index:03d}"
+                    if explicit_seed
+                    else f"{split}-{index:03d}"
+                ),
                 split=split,
                 condition=condition,
                 seed=seed,

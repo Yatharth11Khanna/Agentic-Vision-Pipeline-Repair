@@ -1,0 +1,79 @@
+We are continuing the existing **Agentic Vision Pipeline Repair** project. Do not rebuild the application or redesign the UI. First inspect `vision_pipeline.py`, `repair_agent.py`, `app.py`, the existing tests, and the saved experiment report.
+
+## Objective
+
+Build a reproducible benchmark that tests whether our validation-driven repair agent actually outperforms simpler alternatives and generalizes to unseen images.
+
+### 1. Implement a fair three-way comparison
+
+Compare:
+
+1. **Baseline:** the existing unmodified OpenCV pipeline.
+2. **Adaptive repair agent:** the existing agent, with its decisions and behavior retained and made auditable.
+3. **Budget-matched non-adaptive search:** a deterministic random or predefined search over the same permitted parameter space, with the same number of candidate evaluations as the adaptive agent.
+
+All methods must use the same generated datasets, evaluation rules, image-matching thresholds, and candidate-evaluation budget. Do not give one method extra experiments or privileged information.
+
+### 2. Evaluate across independent seeds
+
+Run at least five reproducible trials using distinct dataset seeds. For each trial:
+
+- Generate separate training, validation, and held-out test data.
+- Ensure the held-out images and their generation seeds are not used to select configurations.
+- Select configurations using validation metrics only.
+- Evaluate each method's final configuration on exactly the same test images for that trial.
+- Preserve each trial's seed, configurations, candidate evaluations, decisions, and results.
+
+Inspect the existing data generator first and make the smallest necessary changes to support independent seeds. Avoid changing image-generation difficulty between competing methods.
+
+### 3. Report meaningful metrics
+
+For each method, report:
+
+- Precision, recall, F1, and image-level failure rate.
+- Results for every image condition.
+- Mean and standard deviation across trials.
+- Paired differences against the baseline and non-adaptive search.
+- Confidence intervals where appropriate.
+- Number of experiments, wall-clock runtime, and improvement per experiment.
+- Cases repaired, regressions introduced, and failures remaining.
+
+Show per-trial results as well as aggregate results. Do not hide unfavorable trials or present validation improvements as test improvements.
+
+### 4. Protect experimental integrity
+
+- The test set must never influence configuration selection or stopping decisions.
+- Use identical trial data for all three methods.
+- Record all candidate evaluations, including rejected configurations.
+- Make random search reproducible and enforce the same experiment budget.
+- Do not tune the agent's strategy against held-out test results.
+- If the adaptive agent does not outperform the simpler alternative, report that honestly and identify the likely reason.
+
+### 5. Add a Benchmark section to Streamlit
+
+Add a benchmark control that runs the comparison and displays:
+
+- A comparison table and charts.
+- Aggregate and per-trial metrics.
+- Per-condition performance.
+- Runtime and experiment-budget comparisons.
+- Regressions and representative failure examples.
+- Downloadable JSON and CSV reports.
+
+Keep the existing Dataset, Baseline, Agent Run, Results, Failure Analysis, and Trace functionality working.
+
+### 6. Add automated tests
+
+Test reproducibility, independent trial seeds, equal experiment budgets, identical test images within each comparison, validation-only selection, report completeness, and correct aggregate metrics. Run the complete existing and new test suite.
+
+### Constraints
+
+- Keep `opencv-python-headless==5.0.0.93` pinned and verify OpenCV 5 at runtime.
+- Do not introduce a paid API dependency.
+- Do not fabricate metrics or claim benchmark results before the experiments actually run.
+- Preserve the existing implementation and saved report.
+- Do not start AWS integration, add unrelated features, or undertake a UI redesign in this milestone.
+
+### Definition of done
+
+The benchmark runs end to end, results are saved and downloadable, tests pass, and the evidence makes it possible to determine whether adaptive repair offers a measurable advantage. If it does not, explain the result rather than manufacturing a win.
