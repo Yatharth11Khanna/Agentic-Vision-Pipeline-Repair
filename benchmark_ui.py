@@ -38,7 +38,8 @@ def _render_method_summary(report: dict[str, Any]) -> None:
     st.subheader("Held-out test results")
     st.caption(
         "Each method was evaluated on the same test images within a trial. "
-        "Intervals describe variation across independent trials."
+        "Intervals are unclipped two-sided Student-t intervals across trials; with five trials, "
+        "an interval can extend beyond the metric's 0–100% bounds."
     )
     aggregates = report["aggregates"]["methods"]
     columns = st.columns(len(METHOD_LABELS))
@@ -80,8 +81,6 @@ def _render_method_summary(report: dict[str, Any]) -> None:
         x="Method",
         y="F1",
         color="Method",
-        y_min=0,
-        y_max=1,
     )
 
 
@@ -115,8 +114,6 @@ def _render_condition_results(report: dict[str, Any]) -> None:
     st.line_chart(
         pd.DataFrame(f1_rows).set_index("Condition"),
         y=[METHOD_LABELS[method] for method in METHOD_LABELS],
-        y_min=0,
-        y_max=1,
     )
     st.dataframe(condition_rows, hide_index=True, width="stretch")
 

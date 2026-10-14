@@ -10,7 +10,7 @@ from pathlib import Path
 from statistics import mean, stdev
 from typing import Any
 
-from vision_pipeline import CONDITIONS
+from vision_pipeline import CONDITION_LABELS, CONDITIONS
 
 METRIC_KEYS = ("precision", "recall", "f1", "failure_rate")
 METHOD_LABELS = {
@@ -302,11 +302,41 @@ def benchmark_conclusion(
             f"Adaptive validation F1 gain ({adaptive_validation_gain:+.4f}) exceeded its held-out "
             f"gain ({adaptive_test_gain:+.4f}), consistent with a validation-to-test generalization gap."
         )
+    adaptive_conditions = aggregates["methods"]["adaptive"]["test_by_condition"]
+    random_conditions = aggregates["methods"]["random_search"]["test_by_condition"]
+    condition_differences = {
+        condition: adaptive_conditions[condition]["f1"]["mean"]
+        - random_conditions[condition]["f1"]["mean"]
+        for condition in CONDITIONS
+    }
+    strongest_gain = max(condition_differences, key=condition_differences.get)
+    weakest_gain = min(condition_differences, key=condition_differences.get)
+    strongest_value = condition_differences[strongest_gain]
+    weakest_value = condition_differences[weakest_gain]
+    if strongest_value > 0 and weakest_value < 0:
+        condition_note = (
+            f"Mean per-condition F1 gains were mixed: {CONDITION_LABELS[strongest_gain]} was "
+            f"{strongest_value * 100:+.1f} pp, while {CONDITION_LABELS[weakest_gain]} was "
+            f"{weakest_value * 100:+.1f} pp, suggesting condition-specific rather than uniform gains."
+        )
+    elif abs(strongest_value) <= 1e-12 and abs(weakest_value) <= 1e-12:
+        condition_note = "The methods had equal mean F1 in every test condition."
+    elif strongest_value <= 0:
+        condition_note = (
+            f"Adaptive repair did not have a higher mean per-condition F1 in any condition; "
+            f"its largest deficit was {CONDITION_LABELS[weakest_gain]} "
+            f"({weakest_value * 100:+.1f} pp)."
+        )
+    else:
+        condition_note = (
+            "Adaptive repair had higher mean per-condition F1 throughout, but the paired interval "
+            "still spans zero at this trial count."
+        )
     return (
         f"No clear held-out F1 advantage for adaptive repair over budget-matched random search: "
         f"paired mean difference {difference:+.4f}, 95% CI {low:+.4f} to {high:+.4f}. "
-        "The interval spans zero, so the observed between-trial variation does not support a "
-        "repeatable winner at this trial count."
+        f"The interval spans zero, so the observed between-trial variation does not support a "
+        f"repeatable winner at this trial count. {condition_note}"
     )
 
 
