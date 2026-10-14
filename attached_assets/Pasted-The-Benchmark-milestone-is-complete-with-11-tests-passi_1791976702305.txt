@@ -1,0 +1,19 @@
+The Benchmark milestone is complete, with 11 tests passing and benchmark reports saved. However, I can no longer see the app preview in Replit.
+
+**Fix the preview before making any further feature changes. Do not rebuild the project or remove the Benchmark section.**
+
+1. Inspect the existing `.replit` workflow, current project structure, and the latest changes to `app.py` and the benchmark modules.
+2. Run the existing `Vision Repair Streamlit` workflow and inspect its actual startup logs. Identify the specific cause of the missing preview instead of assuming it is working because the tests pass.
+3. Verify that the configured Python environment exists, Streamlit and all required dependencies are installed, and the application starts without import errors, syntax errors, or runtime exceptions.
+4. Preserve the existing preview configuration unless you identify a concrete reason it needs changing. Ensure Streamlit binds to `0.0.0.0` on the port expected by the Replit workflow. Do not start competing Streamlit processes on the same port.
+5. If the app crashes, fix the underlying issue with the smallest targeted code change. Preserve the benchmark comparison, saved reports, downloads, and all existing functionality.
+6. Restart the workflow and verify all of the following:
+   - The process remains running.
+   - The configured preview port becomes available.
+   - The root page responds successfully.
+   - The Streamlit page executes without application errors.
+   - The Benchmark section renders and its controls work.
+   - The existing test suite still passes.
+7. If the server responds but the preview remains invisible, inspect the Replit Webview/workflow configuration and explain exactly how to reopen the preview.
+
+**Do not claim success based only on an HTTP 200 response or tests.** Report the root cause, the files changed, the exact startup command, the actual verification results, and whether the preview is currently visible in Replit. Do not start AWS integration or unrelated development until this is resolved.
