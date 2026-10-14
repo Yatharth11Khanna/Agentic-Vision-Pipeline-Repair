@@ -1,0 +1,22 @@
+The preview is STILL completely blank/invisible after the previous fix. Do not add features or rebuild the app. Diagnose the live Replit workspace and fix the actual cause.
+
+Important: the project ZIP I inspected still showed `runButton = "Project"` in `.replit`, despite the previous report claiming the Run button was changed to target `Vision Repair Streamlit`. Check the current live file rather than assuming the fix was saved.
+
+1. Inspect the current `.replit` file. Make the Run button target the existing `Vision Repair Streamlit` workflow with `outputType = "webview"`, while preserving the existing workflow and app.
+2. Inspect the actual Run button workflow configuration and confirm which workflow runs when I click Run.
+3. Stop duplicate or stale Streamlit processes, then launch exactly one process using the existing project environment:
+   `.pythonlibs/bin/streamlit run app.py --server.port 5000 --server.address 0.0.0.0 --server.headless true`
+4. Inspect the complete startup logs and fix any actual startup or rendering errors.
+5. Verify the process is listening on port 5000 and that the root page returns valid Streamlit HTML, not merely an HTTP 200 response.
+6. Verify the live Webview is attached to port 5000. If Replit exposes a preview URL or Webview status, report it and confirm whether it opens successfully.
+7. If the server works but the Webview remains blank, investigate the Webview configuration, browser-console errors if accessible, and Replit workflow output type. Do not repeatedly restart the same process without diagnosing the cause.
+8. Preserve all existing benchmark functionality and generated reports. Run the tests after any changes.
+
+At the end, tell me exactly:
+- What the live `.replit` file contained before and after the fix.
+- Which workflow the Run button targets.
+- Whether the app process is running on port 5000.
+- Whether the Webview actually opens and displays the dashboard.
+- Any remaining manual action I need to take.
+
+Do not claim the preview is fixed unless the dashboard is actually visible in the Webview. If you cannot directly verify visibility, state that limitation clearly.
