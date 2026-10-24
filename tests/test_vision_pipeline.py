@@ -1,10 +1,18 @@
 import cv2
 import numpy as np
 
-from repair_agent import run_repair_agent
+from repair_agent import (
+    diagnose_failure,
+    order_proposals_for_diagnosis,
+    parameter_changes,
+    run_adaptive_selection,
+    run_repair_agent,
+    validation_objective,
+)
 from vision_pipeline import (
     BASELINE_CONFIG,
     CONDITIONS,
+    DetectorConfig,
     IMAGE_SIZE,
     SPLIT_SEEDS,
     GroundTruth,
@@ -97,3 +105,83 @@ def test_agent_uses_validation_for_selection_and_pairs_held_out_images() -> None
     assert report["test"]["comparison"]["same_sample_ids"] is True
     assert report["test"]["comparison"]["same_image_count"] == len(test)
     assert any(event["type"] == "experiment" for event in report["trace"])
+
+
+def test_targeted_diagnosis_and_deterministic_action_trace() -> None:
+    samples = generate_split("validation")
+    first = run_adaptive_selection(samples, budget=2)
+    second = run_adaptive_selection(samples, budget=2)
+
+    assert first["selected_config"] == second["selected_config"]
+    assert first["experiment_count"] == second["experiment_count"]
+    experiments = [event for event in first["trace"] if event["type"] == "experiment"]
+    assert experiments
+    for experiment in experiments:
+        assert experiment["observation"]
+        assert experiment["diagnosis"]["measured_evidence"]
+        assert experiment["diagnosis"]["heuristic_basis"]
+        assert experiment["action"]["reason"]
+        assert experiment["metrics_after"] == experiment["validation_metrics"]
+        assert experiment["accept_reject"] in {"accept", "reject"}
+        assert experiment["observation"]["metrics_before"] == experiment["observation"]["metrics_before"]
+        assert experiment["objective_before"] == round(
+            validation_objective(experiment["observation"]["metrics_before"]), 6
+        )
+
+
+def test_controlled_failure_patterns_change_targeted_proposal_order() -> None:
+    proposals = [
+        ("raise minimum contour area to reject false detections", BASELINE_CONFIG),
+        ("lower the value floor to admit target pixels", DetectorConfig(min_value=5)),
+    ]
+
+    def fake_evaluation(false_positives: int, false_negatives: int) -> dict:
+        return {
+            "by_condition": {
+                "noise": {
+                    "images": 1,
+                    "fp": false_positives,
+                    "fn": false_negatives,
+                    "precision": 0.5,
+                    "recall": 0.5,
+                    "failure_rate": 1.0,
+                }
+            }
+        }
+
+    fn_only = diagnose_failure(fake_evaluation(0, 2), "noise")
+    fp_only = diagnose_failure(fake_evaluation(2, 0), "noise")
+    fn_first = order_proposals_for_diagnosis(proposals, fn_only)
+    fp_first = order_proposals_for_diagnosis(proposals, fp_only)
+
+    assert "lower" in fn_first[0][0]
+    assert "area" in fp_first[0][0]
+    assert fn_first != fp_first
+
+
+def test_parameter_changes_and_diagnosis_are_complete() -> None:
+    evaluation = evaluate_dataset(generate_split("validation")[:7], BASELINE_CONFIG)
+    condition = next(
+        condition
+        for condition, metrics in evaluation["by_condition"].items()
+        if metrics["fn"] > 0
+    )
+    diagnosis = diagnose_failure(evaluation, condition)
+
+    assert diagnosis["measured_evidence"]["condition"] == condition
+    assert diagnosis["evidence_type"].startswith("measured metrics")
+    assert parameter_changes(BASELINE_CONFIG, BASELINE_CONFIG) == {}
+
+
+def test_rejected_candidate_rolls_back_and_budget_is_hard_limit() -> None:
+    samples = generate_split("validation")
+    report = run_adaptive_selection(samples, budget=2)
+
+    assert report["experiment_count"] <= 2
+    rejected = [event for event in report["trace"] if event.get("accept_reject") == "reject"]
+    for event in rejected:
+        assert "current best retained" in event["rollback"]
+    assert report["selected_config"] == BASELINE_CONFIG.__dict__ or report["repair_selected"]
+    for experiment in rejected:
+        rejected_config = DetectorConfig(**experiment["config"])
+        assert rejected_config != DetectorConfig(**report["selected_config"])

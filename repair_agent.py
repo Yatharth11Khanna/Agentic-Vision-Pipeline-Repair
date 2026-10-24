@@ -36,6 +36,84 @@ def validation_objective(metrics: dict[str, Any]) -> float:
     return float(metrics["f1"]) - 0.10 * float(metrics["failure_rate"])
 
 
+def diagnose_failure(evaluation: dict[str, Any], condition: str) -> dict[str, Any]:
+    """Separate measured condition counts from heuristic action recommendations."""
+    condition_metrics = evaluation["by_condition"][condition]
+    measured = {
+        "condition": condition,
+        "images": condition_metrics["images"],
+        "false_positives": condition_metrics["fp"],
+        "false_negatives": condition_metrics["fn"],
+        "precision": condition_metrics["precision"],
+        "recall": condition_metrics["recall"],
+        "failure_rate": condition_metrics["failure_rate"],
+    }
+    if condition_metrics["fn"] > 0 and condition_metrics["fp"] > 0:
+        mode = "mixed missed-target and false-positive failures"
+        heuristic = "Compare segmentation recall and geometry rejection actions; do not widen filters without false-positive control."
+    elif condition_metrics["fn"] > 0:
+        mode = "missed target failures dominate"
+        heuristic = "Prefer recall-oriented segmentation changes such as lower thresholds, wider hue tolerance, or blur/circularity relaxation."
+    elif condition_metrics["fp"] > 0:
+        mode = "false-positive failures dominate"
+        heuristic = "Prefer precision-oriented geometric changes such as larger minimum area or stronger morphology/circularity filtering."
+    else:
+        mode = "no measured failure count in this condition"
+        heuristic = "No failure-guided action is required."
+    return {
+        "measured_evidence": measured,
+        "diagnosis": mode,
+        "heuristic_basis": heuristic,
+        "evidence_type": "measured metrics; diagnosis classifies dominant failure counts, not causal image analysis",
+    }
+
+
+def _diagnosis_action_priorities(diagnosis: dict[str, Any]) -> tuple[str, ...]:
+    """Map measured FP/FN evidence to broad parameter priorities within existing proposals."""
+    measured = diagnosis["measured_evidence"]
+    false_positives = measured["false_positives"]
+    false_negatives = measured["false_negatives"]
+    if false_negatives > 0 and false_positives == 0:
+        return ("recall", "balanced", "precision")
+    if false_positives > 0 and false_negatives == 0:
+        return ("precision", "balanced", "recall")
+    return ("balanced", "recall", "precision")
+
+
+def order_proposals_for_diagnosis(
+    proposals: list[tuple[str, DetectorConfig]], diagnosis: dict[str, Any]
+) -> list[tuple[str, DetectorConfig]]:
+    """Deterministically prioritize existing safe proposals for the measured failure mode."""
+    precision_terms = ("area", "circularity", "morphology", "reject", "false")
+    recall_terms = ("lower", "widen", "relax", "blur", "preserve", "admit")
+
+    def group(reason_config: tuple[str, DetectorConfig]) -> tuple[int, str, DetectorConfig]:
+        reason = reason_config[0].lower()
+        if any(term in reason for term in precision_terms):
+            parameter_group = "precision"
+        elif any(term in reason for term in recall_terms):
+            parameter_group = "recall"
+        else:
+            parameter_group = "balanced"
+        priorities = _diagnosis_action_priorities(diagnosis)
+        return priorities.index(parameter_group), reason, reason_config[1]
+
+    return [(reason, config) for _, reason, config in sorted(
+        ((group(item)[0], group(item)[1], group(item)[2]) for item in proposals),
+        key=lambda ordered: (ordered[0], ordered[1]),
+    )]
+
+
+def parameter_changes(before: DetectorConfig, after: DetectorConfig) -> dict[str, Any]:
+    before_values = config_as_dict(before)
+    after_values = config_as_dict(after)
+    return {
+        key: {"before": before_values[key], "after": after_values[key]}
+        for key in before_values
+        if before_values[key] != after_values[key]
+    }
+
+
 def _weakest_conditions(evaluation: dict[str, Any]) -> list[str]:
     by_condition = evaluation["by_condition"]
     ranked = sorted(
@@ -215,13 +293,19 @@ def run_adaptive_selection(
         selected_condition: str | None = None
         selected_reason: str | None = None
         candidate: DetectorConfig | None = None
+        selected_diagnosis: dict[str, Any] | None = None
         for condition in priorities:
-            for reason, proposal in _proposals_for_condition(condition, best_config):
+            diagnosis = diagnose_failure(best_validation, condition)
+            proposals = order_proposals_for_diagnosis(
+                _proposals_for_condition(condition, best_config), diagnosis
+            )
+            for reason, proposal in proposals:
                 key = json.dumps(config_as_dict(proposal), sort_keys=True)
                 if key not in tested:
                     selected_condition = condition
                     selected_reason = reason
                     candidate = proposal
+                    selected_diagnosis = diagnosis
                     break
             if candidate is not None:
                 break
@@ -242,10 +326,11 @@ def run_adaptive_selection(
             "type": "decision",
             "decision": (
                 f"Investigate {CONDITION_LABELS[selected_condition]} because it has the weakest "
-                "current validation objective; "
-                f"{selected_reason}."
+                "current validation objective; measured evidence diagnosed "
+                f"{selected_diagnosis['diagnosis']}; {selected_reason}."
             ),
             "selected_condition": selected_condition,
+            "diagnosis": selected_diagnosis,
             "current_best_config": config_as_dict(best_config),
             "current_best_validation": best_validation["metrics"],
         }
@@ -266,17 +351,37 @@ def run_adaptive_selection(
         candidate_objective = validation_objective(candidate_validation["metrics"])
         objective_change = candidate_objective - best_objective
         meaningful = objective_change >= MIN_MEANINGFUL_IMPROVEMENT
+        diagnosis = selected_diagnosis or diagnose_failure(best_validation, selected_condition)
+        changes = parameter_changes(best_config, candidate)
+        accepted = objective_change >= MIN_MEANINGFUL_IMPROVEMENT
         experiment = {
             "number": experiment_number,
             "focus_condition": selected_condition,
+            "observation": {
+                "metrics_before": best_validation["metrics"],
+                "condition_metrics_before": best_validation["by_condition"][selected_condition],
+            },
+            "diagnosis": diagnosis,
+            "action": {
+                "reason": selected_reason,
+                "parameter_changes": changes,
+            },
             "decision": decision["decision"],
             "reason": selected_reason,
             "config": config_as_dict(candidate),
             "validation_metrics": candidate_validation["metrics"],
+            "metrics_after": candidate_validation["metrics"],
             "validation_by_condition": candidate_validation["by_condition"],
             "objective": round(candidate_objective, 6),
+            "objective_before": round(best_objective, 6),
+            "objective_after": round(candidate_objective, 6),
             "objective_change_vs_best": round(objective_change, 6),
             "meaningful_improvement": meaningful,
+            "acceptance_rule": (
+                f"accept only when validation objective improves by at least {MIN_MEANINGFUL_IMPROVEMENT:.3f}"
+            ),
+            "accept_reject": "accept" if accepted else "reject",
+            "rollback": "candidate already measured and rejected; current best retained" if not accepted else "none",
             "runtime_ms": candidate_validation["runtime_ms"],
         }
         if meaningful:

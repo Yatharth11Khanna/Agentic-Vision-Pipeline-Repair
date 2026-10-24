@@ -13,6 +13,7 @@ try:
     import cv2
 
     from benchmark_ui import load_saved_benchmark, render_benchmark_page
+    from real_image_evaluation import evaluate_real_images
     from repair_agent import run_repair_agent, save_run_report
     from vision_pipeline import (
         BASELINE_CONFIG,
@@ -565,6 +566,95 @@ def failure_analysis_page() -> None:
         st.json({key: example["repaired"][key] for key in ("tp", "fp", "fn", "is_success")})
 
 
+def real_image_page() -> None:
+    st.title("Real-image evaluation")
+    st.warning(
+        "Real-world validation requires independently collected and labeled images. "
+        "Synthetic images, labels created by the app, or tunable real-image sets are not real-world evidence."
+    )
+    st.write(
+        "Upload matching images and a JSON manifest with one target circle per image. "
+        "The baseline configuration is evaluated using the same detector and IoU rules as the synthetic benchmark."
+    )
+    manifest_format = {
+        "filename": "example.jpg",
+        "center_x": 320,
+        "center_y": 240,
+        "radius": 18,
+        "condition": "outdoor",
+    }
+    st.code(json.dumps([manifest_format], indent=2), language="json")
+
+    uploaded_images = st.file_uploader(
+        "Labeled images",
+        type=["jpg", "jpeg", "png", "bmp", "tif", "tiff"],
+        accept_multiple_files=True,
+    )
+    manifest_upload = st.file_uploader("Annotation manifest JSON", type=["json"])
+    if uploaded_images and manifest_upload:
+        if st.button("Evaluate uploaded real images", type="primary"):
+            import tempfile
+            from pathlib import Path
+
+            from real_image_evaluation import load_real_image_manifest
+
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                temporary_path = Path(temporary_directory)
+                manifest_path = temporary_path / "manifest.json"
+                manifest_path.write_bytes(manifest_upload.getvalue())
+                uploaded_names = set()
+                for uploaded_image in uploaded_images:
+                    filename = Path(uploaded_image.name).name
+                    if filename in uploaded_names:
+                        st.error(f"Duplicate uploaded filename: {filename}")
+                        return
+                    uploaded_names.add(filename)
+                    (temporary_path / filename).write_bytes(uploaded_image.getvalue())
+                try:
+                    manifest_records = json.loads(manifest_upload.getvalue())
+                    if isinstance(manifest_records, dict):
+                        manifest_records = manifest_records.get("images")
+                    manifest_names = {
+                        record["filename"] for record in manifest_records
+                        if isinstance(record, dict) and isinstance(record.get("filename"), str)
+                    }
+                    if uploaded_names != manifest_names:
+                        missing = sorted(manifest_names - uploaded_names)
+                        extra = sorted(uploaded_names - manifest_names)
+                        raise ValueError(
+                            "Uploaded images must exactly match manifest filenames"
+                            + (f"; missing: {', '.join(missing)}" if missing else "")
+                            + (f"; extra: {', '.join(extra)}" if extra else "")
+                        )
+                    samples = load_real_image_manifest(manifest_path, temporary_path)
+                    evaluation = evaluate_real_images(samples)
+                except Exception as error:
+                    st.error(f"{type(error).__name__}: {error}")
+                    return
+
+            st.subheader("Real-image results")
+            st.caption("These are actual uploaded-image results only; no real-image data affected configuration selection.")
+            render_metrics(evaluation["metrics"])
+            rows = []
+            for image_result in evaluation["image_results"]:
+                rows.append({
+                    "Image": image_result["sample_id"].removeprefix("real-"),
+                    "Condition": image_result["condition"],
+                    "TP": image_result["tp"],
+                    "FP": image_result["fp"],
+                    "FN": image_result["fn"],
+                    "Matched IoU": image_result["matched_iou"],
+                    "Success": image_result["is_success"],
+                })
+            st.dataframe(rows, hide_index=True, width="stretch")
+            st.download_button(
+                "Download real-image evaluation JSON",
+                data=json.dumps(evaluation, indent=2),
+                file_name="real-image-evaluation.json",
+                mime="application/json",
+            )
+
+
 def trace_page() -> None:
     st.title("Agent trace")
     report = st.session_state.get("run_report")
@@ -588,14 +678,27 @@ def trace_page() -> None:
             if event.get("metrics"):
                 st.markdown("**Measured validation metrics**")
                 render_metrics(event["metrics"])
+            if event.get("observation"):
+                st.markdown("**Observation — measured evidence**")
+                st.json(event["observation"])
+            if event.get("diagnosis"):
+                st.markdown("**Diagnosis**")
+                st.write(event["diagnosis"]["diagnosis"])
+                st.caption(event["diagnosis"]["heuristic_basis"])
+            if event.get("action"):
+                st.markdown("**Chosen action**")
+                st.write(event["action"]["reason"])
+                st.json(event["action"]["parameter_changes"])
             if event.get("validation_metrics"):
                 st.markdown("**Measured candidate metrics**")
                 render_metrics(event["validation_metrics"])
                 st.caption(
                     f"Objective: {event['objective']:.4f} · "
                     f"change vs best: {event['objective_change_vs_best']:+.4f} · "
-                    f"selected as best: {event.get('selected_as_best', False)}"
+                    f"Decision: {event.get('accept_reject', 'unknown')}"
                 )
+                if event.get("rollback"):
+                    st.caption(event["rollback"])
             if event.get("by_condition"):
                 render_condition_table(event["by_condition"])
             if event.get("validation_by_condition"):
@@ -630,6 +733,7 @@ page = st.sidebar.radio(
         "Baseline",
         "Agent run",
         "Benchmark",
+        "Real-image evaluation",
         "Results",
         "Failure analysis",
         "Agent trace",
@@ -647,6 +751,8 @@ elif page == "Agent run":
     agent_run_page()
 elif page == "Benchmark":
     render_benchmark_page(load_split, annotate_sample)
+elif page == "Real-image evaluation":
+    real_image_page()
 elif page == "Results":
     results_page()
 elif page == "Failure analysis":

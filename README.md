@@ -8,17 +8,68 @@ on the same held-out test images.
 ## Run
 
 The project is pinned to Python 3.11+ and `opencv-python-headless==5.0.0.93`. OpenCV 4 is not
-accepted as a fallback.
+accepted as a fallback. The verified development environment uses Python 3.12 with the project
+virtual environment at `.venv`.
 
 ```bash
-.pythonlibs/bin/streamlit run app.py --server.port 5000 --server.address 0.0.0.0
+.venv/bin/python -m streamlit run app.py --server.port 5000 --server.address 0.0.0.0
 ```
 
-The Replit workflow starts the same command. To run the test suite:
+To run the complete test suite:
 
 ```bash
-.pythonlibs/bin/python -m pytest -q
+.venv/bin/python -m pytest -q
 ```
+
+The app checks both `cv2.__version__` and the installed package metadata at startup. A missing
+or incompatible OpenCV 5 installation is reported as an error and is never silently replaced by
+OpenCV 4.
+
+## Deterministic agent demo
+
+With the fixed validation seed `2207`, a six-candidate demonstration using Python 3.12.3 produced
+this reproducible sequence in the validation-only agent run:
+
+1. Experiment 1 rejected `hue_center=164`; objective changed from `0.783334` to `0.116421`.
+2. Experiment 2 rejected `hue_center=172`; objective changed from `0.783334` to `0.766884`.
+3. Experiment 3 rejected `hue_center=16`; objective changed from `0.783334` to `0.059273`.
+4. Experiment 4 accepted `hue_center=8`; objective increased from `0.783334` to `0.839036`.
+5. Experiment 5 rejected `hue_center=24`, measured from `0.839036` to `0.065368`.
+6. Experiment 6 rejected `hue_tolerance=26`, measured from `0.839036` to `0.667633`; the accepted
+   `hue_center=8` configuration remained selected.
+
+Execute and inspect the trace directly:
+
+```bash
+.venv/bin/python - <<'PY'
+from repair_agent import run_adaptive_selection
+from vision_pipeline import generate_split
+
+report = run_adaptive_selection(generate_split("validation"), budget=6)
+print("selected config:", report["selected_config"])
+for event in report["trace"]:
+    if event["type"] == "experiment":
+        print(event["number"], event["diagnosis"]["diagnosis"],
+              event["action"]["parameter_changes"], event["accept_reject"])
+PY
+```
+
+This short trace is illustrative of the loop, not a claim that the repair is better than random
+search. The six-budget sequence is separate from the five-trial benchmark's existing stopping rules.
+
+## Production container
+
+Build and run the OpenCV 5 application locally:
+
+```bash
+docker build -t agentic-vision-pipeline-repair .
+docker run --rm -p 8080:8080 agentic-vision-pipeline-repair
+```
+
+The service binds to `0.0.0.0:${PORT:-8080}` and exposes Streamlit health at
+`/_stcore/health`. Uploaded images and manifests are processed in temporary container storage;
+they are not persisted when a container restarts or is replaced. Do not use ephemeral storage
+as a dataset archive. Supply independently labeled data again when a new container instance starts.
 
 At startup, the app checks both `cv2.__version__` and the installed package version. A missing,
 incompatible, or non-5 installation is shown as an error; it is never described as OpenCV 5.
@@ -39,8 +90,9 @@ incompatible, or non-5 installation is shown as an error; it is never described 
   one can match the target, and all unmatched predictions are false positives. An image fails if
   it has any false positive or false negative.
 - The agent evaluates its initial configuration and every candidate on validation images only. It
-  prioritizes the weakest condition, proposes condition-relevant bounded parameter changes, and
-  uses measured results to update its best configuration and next decision.
+  prioritizes the weakest condition, diagnoses its measured FP/FN pattern, and reorders existing
+  bounded condition-specific proposals before execution. The diagnosis is a heuristic based on
+  aggregate counts, not proof of an image-level causal mechanism.
 - The search budget is 12 candidates. It stops after four consecutive experiments below the
   meaningful-improvement threshold, if no validation failures remain to guide a search, or if the
   unique candidate space is exhausted.
@@ -83,4 +135,17 @@ Benchmark files are separate from the existing single-run report:
 
 Use the app's download buttons to export either file. The default is five trials with base seed
 `20261013`; the base seed and trial count can be changed in the Benchmark page.
+
+## Submission status and limitations
+
+- The benchmark and all performance evidence currently use synthetic, deterministically generated
+  images with independently generated labels.
+- The real-image upload workflow evaluates independently uploaded, labeled images with the same
+  detector and IoU rules, but no genuine real-world dataset evaluation has been verified.
+- AWS deployment has not been completed. There is no public AWS URL or deployment claim.
+- The fresh five-trial causal-diagnosis benchmark produced mean held-out F1 values of 0.619403
+  baseline, 0.698988 adaptive, and 0.678928 random search. Adaptive minus random was +0.0201 with
+  95% CI [-0.0357, +0.0759], so adaptive superiority is not established.
+- Official competition deadline and submission/judging requirements must be checked against the
+  current competition rules; this repository does not assert that AWS hosting is mandatory.
 
