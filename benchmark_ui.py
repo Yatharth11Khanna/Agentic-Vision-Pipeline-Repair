@@ -16,7 +16,7 @@ from benchmark import (
     MIN_TRIALS,
     run_benchmark,
 )
-from benchmark_reporting import METHOD_LABELS
+from benchmark_reporting import METHOD_LABELS, save_benchmark_report
 from vision_pipeline import CONDITION_LABELS, CONDITIONS
 
 
