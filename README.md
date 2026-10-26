@@ -21,6 +21,23 @@ To run the complete test suite:
 .venv/bin/python -m pytest -q
 ```
 
+## Streamlit Community Cloud
+
+The Community Cloud entry point is `app.py`. Select Python 3.12 and deploy from the
+`main` branch. The root `requirements.txt` pins the verified runtime packages, including
+OpenCV 5.0.0.93, NumPy 2.5.4, Streamlit 1.65.0, and pandas 3.0.6. The existing `uv.lock`
+also resolves these same versions; Community Cloud prioritizes `uv.lock` over
+`requirements.txt` when choosing a dependency file.
+
+Real-image evaluation limits uploads to 20 images, 20 MB per file, 50 MB total, and a
+1 MB manifest. Run reports are written under `generated-artifacts/`; Community Cloud's
+local filesystem is ephemeral, so download reports you need to keep.
+
+To deploy, create an app in Streamlit Community Cloud using repository
+`Yatharth11Khanna/Agentic-Vision-Pipeline-Repair`, branch `main`, and main file path
+`app.py`. Choose Python 3.12 in Advanced settings. The suggested subdomain is
+`avpr-opencv5` if it is available.
+
 The app checks both `cv2.__version__` and the installed package metadata at startup. A missing
 or incompatible OpenCV 5 installation is reported as an error and is never silently replaced by
 OpenCV 4.
@@ -148,4 +165,3 @@ Use the app's download buttons to export either file. The default is five trials
   95% CI [-0.0357, +0.0759], so adaptive superiority is not established.
 - Official competition deadline and submission/judging requirements must be checked against the
   current competition rules; this repository does not assert that AWS hosting is mandatory.
-

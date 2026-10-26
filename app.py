@@ -193,6 +193,9 @@ def annotate_sample(
 
 
 IMAGE_HEIGHT = 192
+MAX_REAL_IMAGE_COUNT = 20
+MAX_REAL_IMAGE_UPLOAD_BYTES = 50 * 1024 * 1024
+MAX_REAL_IMAGE_MANIFEST_BYTES = 1 * 1024 * 1024
 
 
 def show_evaluation_failures(evaluation: dict[str, Any], samples: list[SyntheticSample], limit: int = 8) -> None:
@@ -584,6 +587,9 @@ def real_image_page() -> None:
         "condition": "outdoor",
     }
     st.code(json.dumps([manifest_format], indent=2), language="json")
+    st.caption(
+        "Uploads are limited to 20 images, 20 MB per file, 50 MB total, and a 1 MB manifest."
+    )
 
     uploaded_images = st.file_uploader(
         "Labeled images",
@@ -593,6 +599,19 @@ def real_image_page() -> None:
     manifest_upload = st.file_uploader("Annotation manifest JSON", type=["json"])
     if uploaded_images and manifest_upload:
         if st.button("Evaluate uploaded real images", type="primary"):
+            if len(uploaded_images) > MAX_REAL_IMAGE_COUNT:
+                st.error(f"Upload no more than {MAX_REAL_IMAGE_COUNT} images at a time.")
+                return
+            if manifest_upload.size > MAX_REAL_IMAGE_MANIFEST_BYTES:
+                st.error("The annotation manifest must be no larger than 1 MB.")
+                return
+            total_upload_bytes = manifest_upload.size + sum(
+                uploaded_image.size for uploaded_image in uploaded_images
+            )
+            if total_upload_bytes > MAX_REAL_IMAGE_UPLOAD_BYTES:
+                st.error("The manifest and images together must be no larger than 50 MB.")
+                return
+
             import tempfile
             from pathlib import Path
 
